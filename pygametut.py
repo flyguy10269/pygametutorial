@@ -4,15 +4,25 @@ from pygame.locals import *
 import math
 import textwrap
 import shelve
+import os
+
 
 pg.init()
-PLAYER_IMAGE = 'data\images\snake.png'
-WALL_IMAGE = 'data\images\wall.png'
-GRASS_IMAGE = 'data\images\grass.png'
+#linux
+PLAYER_IMAGE = os.path.join("data","images","snake.png")
+WALL_IMAGE = os.path.join("data","images","wall.png")
+GRASS_IMAGE = os.path.join("data","images","grass.png")
+TROLL_IMAGE = os.path.join("data","images","troll.png")
+ORC_IMAGE = os.path.join("data","images","orc.png")
+SLIME_IMAGE = os.path.join("data","images","slime.png")
+SKELETON_IMAGE = os.path.join("data","images","skeleton.png")
 
 ROOM_MAX_SIZE = 10
 ROOM_MIN_SIZE = 4
 MAX_ROOMS = 30
+MAX_ROOM_MONSTERS=3
+
+fullscreen = False
 
 colors = {
 			'green':(0,205,0),
@@ -24,12 +34,12 @@ colors = {
 BGCOLOR = colors['black']
 
 #SCREEN SIZING
-TILE_SIZE = 25
+TILE_SIZE = 28
 MAP_SIZE = 35
 map = []
 LIMIT_FPS = 30
 fpsClock = pg.time.Clock()
-window = pg.display.set_mode((TILE_SIZE*MAP_SIZE,TILE_SIZE*MAP_SIZE))
+window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE))
 class Tile:
 	def __init__(self, blocked, block_sight = None):
 		self.blocked = blocked
@@ -58,13 +68,16 @@ class Rect:
 					self.y1 <= other.y2 and self.y2 >= other.y1)
 		
 class Object:
-	def __init__(self, x, y, image):
+	def __init__(self, x, y, image,name, blocks=False):
 		self.x = x
 		self.y = y
 		self.image = image
 		self.surfaceImage = pg.image.load(image).convert()
+		self.name = name
+		self.blocks = blocks
+
 	def move(self, dx, dy):
-		if not map[self.x + dx][self.y + dy].blocked:
+		if not is_blocked(self.x + dx, self.y + dy):
 			self.x += dx
 			self.y += dy
 		
@@ -73,6 +86,37 @@ class Object:
 	
 	def clear(self):
 		window.fill(BGCOLOR,pg.Rect((self.x,self.y),(TILE_SIZE,TILE_SIZE)))
+
+def place_monsters(room):
+	#choose random number of monsters
+	num_monsters = random.randint(0, MAX_ROOM_MONSTERS)
+
+	for r in range(num_monsters):
+		#choose random spot for this monster
+		x = random.randint(room.x1, room.x2)
+		y = random.randint(room.y1, room.y2)
+
+		if not is_blocked(x, y):
+
+			choice = random_percentage()
+
+			if choice <10:
+				#create an orc 10% chance
+				monster = Object(x,y,ORC_IMAGE,"orc")
+			elif choice <10+30:
+				#create a troll 30% chance
+				monster = Object(x,y,TROLL_IMAGE,"troll")
+			elif choice < 10+30+10:
+				#create skeleton 10% chance
+				monster = Object(x,y,SKELETON_IMAGE,"skeleton")
+			else:
+				#create slime 50% chance
+				monster = Object(x,y,SLIME_IMAGE,"slime")
+			objects.append(monster)
+
+def random_percentage():
+
+	return (random.randint(0,100))
 
 def create_room(room):
 	global map
@@ -129,12 +173,13 @@ def make_map():
 			create_room(new_room)
 			(new_x, new_y) = new_room.center()
 			if num_rooms == 0:
-				playerSurfaceObj.x = new_x
-				playerSurfaceObj.y = new_y
+				player.x = new_x
+				player.y = new_y
 				#player.x = new_x
 				#player.y = new_y
 			
 			else:
+				place_monsters(new_room)
 				#all rooms after the first
 				(prev_x, prev_y) = rooms[num_rooms -1].center()
 				
@@ -146,7 +191,24 @@ def make_map():
 					create_h_tunnel(prev_x, new_x, new_y)
 			rooms.append(new_room)
 			num_rooms += 1
-		
+	
+def player_move_or_attack(dx, dy):
+	
+	x = player.x + dx
+	y = player.y + dy
+
+	#try to find an attackable object there
+	target = None
+	for object in objects:
+		if object.x == x and object.y == y:
+			target = object
+			break
+
+	#attack if target found, move otherwise
+	if target is not None:
+		print 'The ' + target.name + ' laughs at your puny efforts to attack'
+	else:
+		player.move(dx, dy)	
 					
 def render_all():
 	#draw all objects
@@ -162,12 +224,72 @@ def render_all():
 	for object in objects:
 		object.draw()
 
+def is_blocked(x, y):
+	#first test the map tile
+	if map[x][y].blocked:
+		return True
+
+	#now check for any blocking objects
+	for object in objects:
+		if object.blocks and object.x == x and object.y == y:
+			return True
+	return False
+
+def toggle_fullscreen():
+	global window
+	flags = window.get_flags()
+	if flags&FULLSCREEN==False:
+		print 'going fullscreen'
+		window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE),
+					pg.FULLSCREEN)
+		fullscreen = True
+	else:
+		window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE))
+		fullscreen = False
+
+def handle_keys():
+	player_choice = None
+	keys = pg.event.get()
+	for event in keys:
+		if event.type == pg.QUIT:
+			return 'exit'
+		elif event.type == KEYDOWN:
+			if event.key == K_ESCAPE:
+				return 'exit'
+			elif ((event.key == K_RETURN) and 
+							(event.mod&(KMOD_LALT|KMOD_RALT)) != 0):
+				toggle_fullscreen()
+
+			if game_state == 'playing':
+				if event.key == K_RIGHT:
+					player_move_or_attack(1,0)
+					player_choice = 'moved'
+				elif event.key == K_LEFT:
+					player_move_or_attack(-1,0)
+					player_choice = 'moved'
+				elif event.key == K_UP:
+					player_move_or_attack(0,-1)
+					player_choice = 'moved'
+				elif event.key == K_DOWN:
+					player_move_or_attack(0,1)
+					player_choice = 'moved'
+				else:
+					return 'noturntaken'
+
+	if player_choice != 'moved':
+		return 'noturntaken'
+	#if not keys and not keys.KEYUP:
+	#	return 'noturntaken'
+
+#FUTURE FOV CALCULATION
+
+
 
 #screen = pg.display.get_surface()			
 #window.fill((0,205,0),pg.Rect((0,0),(50,50)))
 
-playerSurfaceObj = Object(1,1,PLAYER_IMAGE)
-objects = [playerSurfaceObj]
+player = Object(1,1,PLAYER_IMAGE,"player")
+objects = [player]
 
 make_map()
 wallSurface = pg.image.load(WALL_IMAGE).convert()
@@ -176,27 +298,23 @@ grassSurface = pg.image.load(GRASS_IMAGE).convert()
 pg.display.update()
 playing = True
 
+game_state = 'playing'
+player_action = 'None'
 
 while playing:
 	window.fill(BGCOLOR)
 	render_all()
-		
-	for event in pg.event.get():
-		if event.type == pg.QUIT:
-			playing = False
-		
-		elif event.type == KEYDOWN:
-			if event.key == K_ESCAPE:
-				playing = False
-				
-			elif event.key == K_RIGHT:
-				playerSurfaceObj.move(1,0)
-			elif event.key == K_LEFT:
-				playerSurfaceObj.move(-1,0)
-			elif event.key == K_UP:
-				playerSurfaceObj.move(0,-1)
-			elif event.key == K_DOWN:
-				playerSurfaceObj.move(0,1)
-				
+	
+	player_action = handle_keys()
+
+	#print player_action
+
+	if player_action == 'exit':
+		playing = False
+	#let mosnters take their turn
+	if game_state == 'playing' and player_action != 'noturntaken' and player_action != 'exit':
+		for object in objects:
+			if object != player:
+				print 'The ' + object.name + ' growls'
 	pg.display.update()
 	fpsClock.tick(LIMIT_FPS)
