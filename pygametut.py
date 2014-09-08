@@ -28,7 +28,8 @@ colors = {
 			'green':(0,205,0),
 			'blue':(0,0,205),
 			'red':(205,0,0),
-			'black':(0,0,0)
+			'black':(0,0,0),
+			'white':(205,205,205)
 			}
 
 BGCOLOR = colors['black']
@@ -68,7 +69,7 @@ class Rect:
 					self.y1 <= other.y2 and self.y2 >= other.y1)
 		
 class Object:
-	def __init__(self, x, y, image,name, blocks=False):
+	def __init__(self, x, y, image,name, blocks=False, fighter=None, ai=None):
 		self.x = x
 		self.y = y
 		self.image = image
@@ -76,16 +77,108 @@ class Object:
 		self.name = name
 		self.blocks = blocks
 
+		self.fighter = fighter
+		if self.fighter: #let the fighter component know who owns it
+			self.fighter.owner = self
+		self.ai = ai
+		if self.ai: #let the AI component know who owns it
+			self.ai.owner = self
+
 	def move(self, dx, dy):
 		if not is_blocked(self.x + dx, self.y + dy):
 			self.x += dx
 			self.y += dy
+
+	def move_towards(self,target_x,target_y):
+		#vector from this object to the target, and distance
+		dx = target_x - self.x
+		dy = target_y - self.y
+		distance = math.sqrt(dx ** 2 + dy ** 2)
+
+		#normalize it to length 1 (preserving direction), then round it and
+		#convert to integer so the movement is restricted to the map grid
+		dx = int(round(dx / distance))
+		dy = int(round(dy / distance))
+		self.move(dx, dy)
+
+	def distance_to(self, other):
+		#return the distance to another object
+		dx = other.x - self.x
+		dy = other.y - self.y
+		return math.sqrt(dx ** 2 + dy **2)
+
+	def send_to_back(self):
+		#move object to be drawn first so other objects will display above
+		global objects
+		objects.remove(self)
+		objects.insert(0,self)
 		
 	def draw(self):
 		window.blit(self.surfaceImage, (self.x*TILE_SIZE, self.y*TILE_SIZE))
 	
 	def clear(self):
 		window.fill(BGCOLOR,pg.Rect((self.x,self.y),(TILE_SIZE,TILE_SIZE)))
+
+class Fighter():
+	#combat related properties and methods
+	def __init__(self, hp, defense, power,death_function=None):
+		self.max_hp = hp
+		self.hp = hp
+		self.defense = defense
+		self.power = power
+		self.death_function = death_function
+
+	def take_damage(self, damage):
+		#apply damage if possible
+		if damage > 0:
+			self.hp -= damage
+		if self.hp <= 0:
+			function = self.death_function
+			if function is not None:
+				function(self.owner)
+
+	def attack(self, target):
+		#a simple formula for attack damage
+		damage = self.power - target.fighter.defense
+
+		if damage > 0:
+			#make the target take some damage
+			print self.owner.name + ' attacks ' + target.name + ' for ' + str(damage) + ' hit points'
+			target.fighter.take_damage(damage)
+		else:
+			print self.owner.name + ' attacks ' + target.name + ' but it has no effect'
+
+class BasicMonster:
+	#AI for a basic monster
+	def take_turn(self):
+		#a basic monster takes its turn.
+		monster = self.owner
+		distance_to_player = monster.distance_to(player)
+		if distance_to_player >=2:
+			monster.move_towards(player.x, player.y)
+
+		#close enough to attack
+		elif player.fighter.hp > 0:
+			monster.fighter.attack(player)
+
+def player_death(player):
+	#the game ended
+	global game_state
+	print 'You died'
+	game_state = 'dead'
+
+	#for added effect transform player into a corpse
+	player.image = CORPSE_IMAGE
+
+def monster_death(monster):
+	#transform it into a corpse that doesn't block movement
+	print monster.name + ' is dead'
+	monster.image = CORPSE_IMAGE
+	monster.blocks = False
+	monster.fighter = None
+	monster.ai = None
+	monster.name = 'remains of ' + monster.name
+	monster.send_to_back()
 
 def place_monsters(room):
 	#choose random number of monsters
@@ -102,16 +195,28 @@ def place_monsters(room):
 
 			if choice <10:
 				#create an orc 10% chance
-				monster = Object(x,y,ORC_IMAGE,"orc")
+				fighter_component = Fighter(hp=10,defense=0,power=3)
+				ai_component = BasicMonster()
+				monster = Object(x,y,ORC_IMAGE,"orc",blocks=True,
+					fighter = fighter_component,ai=ai_component)
 			elif choice <10+30:
 				#create a troll 30% chance
-				monster = Object(x,y,TROLL_IMAGE,"troll")
+				fighter_component = Fighter(hp=10,defense=0,power=2)
+				ai_component = BasicMonster()
+				monster = Object(x,y,TROLL_IMAGE,"troll",blocks=True,
+					fighter = fighter_component,ai=ai_component)
 			elif choice < 10+30+10:
 				#create skeleton 10% chance
-				monster = Object(x,y,SKELETON_IMAGE,"skeleton")
+				fighter_component = Fighter(hp=10,defense=0,power=1)
+				ai_component = BasicMonster()
+				monster = Object(x,y,SKELETON_IMAGE,"skeleton",blocks=True,
+					fighter=fighter_component,ai=ai_component)
 			else:
 				#create slime 50% chance
-				monster = Object(x,y,SLIME_IMAGE,"slime")
+				fighter_component = Fighter(hp=3,defense=0,power=1)
+				ai_component = BasicMonster()
+				monster = Object(x,y,SLIME_IMAGE,"slime",blocks=True,
+					fighter=fighter_component,ai=ai_component)
 			objects.append(monster)
 
 def random_percentage():
@@ -200,13 +305,13 @@ def player_move_or_attack(dx, dy):
 	#try to find an attackable object there
 	target = None
 	for object in objects:
-		if object.x == x and object.y == y:
+		if object.fighter and object.x == x and object.y == y:
 			target = object
 			break
 
 	#attack if target found, move otherwise
 	if target is not None:
-		print 'The ' + target.name + ' laughs at your puny efforts to attack'
+		player.fighter.attack(target)
 	else:
 		player.move(dx, dy)	
 					
@@ -222,7 +327,14 @@ def render_all():
 				window.blit(grassSurface,(x*TILE_SIZE,y*TILE_SIZE))
 				
 	for object in objects:
-		object.draw()
+		if object != player:
+			object.draw()
+		player.draw()
+
+	#window.blit(font.render(player.fighter.hp),TILE_SIZE*MAP_SIZE+20,30)
+	font = pg.font.Font(None, 60)
+	show_hp = font.render(str(player.fighter.hp),True,colors['white'])
+	window.blit(show_hp,(TILE_SIZE*MAP_SIZE+20,30))
 
 def is_blocked(x, y):
 	#first test the map tile
@@ -288,7 +400,8 @@ def handle_keys():
 #screen = pg.display.get_surface()			
 #window.fill((0,205,0),pg.Rect((0,0),(50,50)))
 
-player = Object(1,1,PLAYER_IMAGE,"player")
+fighter_component = Fighter(hp=30,defense=2,power=50)
+player = Object(1,1,PLAYER_IMAGE,'player',blocks=True,fighter=fighter_component)
 objects = [player]
 
 make_map()
@@ -314,7 +427,7 @@ while playing:
 	#let mosnters take their turn
 	if game_state == 'playing' and player_action != 'noturntaken' and player_action != 'exit':
 		for object in objects:
-			if object != player:
-				print 'The ' + object.name + ' growls'
+			if object.ai:
+				object.ai.take_turn()
 	pg.display.update()
 	fpsClock.tick(LIMIT_FPS)
