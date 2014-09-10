@@ -41,6 +41,25 @@ MAP_SIZE = 35
 map = []
 LIMIT_FPS = 30
 fpsClock = pg.time.Clock()
+
+#side panel settings
+panel = pg.Surface((500,(TILE_SIZE*MAP_SIZE)))
+PANEL_X = TILE_SIZE*MAP_SIZE
+PANEL_Y = 0
+FONT_SIZE = 17
+AntiA = True	#antialiasing
+
+#message log settings
+MSG_X = 5
+MSG_Y = 600
+MSG_HEIGHT = 8 #number of lines to display
+MSG_WIDTH = 50 #number of characters for each line
+game_msgs = []
+
+#HP bar constants
+HP_BAR_X = 50
+HP_BAR_Y = 500
+
 #main surface window
 window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE))
 #GUI side panel
@@ -149,10 +168,11 @@ class Fighter():
 
 		if damage > 0:
 			#make the target take some damage
-			print self.owner.name + ' attacks ' + target.name + ' for ' + str(damage) + ' hit points'
+			message(self.owner.name + ' attacks ' + target.name + ' for ' + str(damage) + ' hit points',
+				colors['red'])
 			target.fighter.take_damage(damage)
 		else:
-			print self.owner.name + ' attacks ' + target.name + ' but it has no effect'
+			message(self.owner.name + ' attacks ' + target.name + ' but it has no effect',colors['blue'])
 
 class BasicMonster:
 	#AI for a basic monster
@@ -170,6 +190,7 @@ class BasicMonster:
 def player_death(player):
 	#the game ended
 	global game_state
+	message('You have died!',colors['red'])
 	print 'You died'
 	game_state = 'dead'
 
@@ -178,7 +199,7 @@ def player_death(player):
 
 def monster_death(monster):
 	#transform it into a corpse that doesn't block movement
-	print monster.name + ' is dead'
+	message(monster.name + ' is dead.')
 	monster.image = CORPSE_IMAGE
 	monster.surfaceImage = pg.image.load(CORPSE_IMAGE).convert()
 	monster.blocks = False
@@ -270,25 +291,19 @@ def make_map():
 		
 		failed = False
 		
-		for other_room in rooms:
-			print "room looping"
-			
+		for other_room in rooms:		
 			if new_room.intersect(other_room):
-				print "room intersect"
-				
 				failed = True
 				break
 				
 		if not failed:
-			print "first room created"
 			
 			create_room(new_room)
 			(new_x, new_y) = new_room.center()
 			if num_rooms == 0:
+				print "first room created"
 				player.x = new_x
 				player.y = new_y
-				#player.x = new_x
-				#player.y = new_y
 			
 			else:
 				place_monsters(new_room)
@@ -322,6 +337,19 @@ def player_move_or_attack(dx, dy):
 	else:
 		player.move(dx, dy)	
 	
+def message(new_msg, color = colors['white']):
+	#split the message if needed
+	new_msg_lines = textwrap.wrap(new_msg,MSG_WIDTH)
+
+	for line in new_msg_lines:
+		#if the buffer is full, remove the first line
+		if len(game_msgs) == MSG_HEIGHT:
+			del game_msgs[0]
+			print('message redacted')
+
+		#add the new line as a tuple, with the text and color
+		game_msgs.append((line, color))
+
 def render_bar(x,y,total_width,name,value,maximum,bar_color,back_color):
 	#clear side panel
 	panel.fill(colors['black'])
@@ -334,7 +362,21 @@ def render_bar(x,y,total_width,name,value,maximum,bar_color,back_color):
 	#testing bar
 	bar.fill(bar_color)
 	window.blit(panel,(TILE_SIZE*MAP_SIZE,300))
-	#centered text with values
+
+	#text with values
+	font = pg.font.Font(None, FONT_SIZE)
+	text = font.render(name + ': ' +str(value) + '/' + str(maximum),
+		AntiA,colors['white'])
+
+	panel.blit(text,(x+total_width/2,y))
+
+	#display messages
+	y = 1
+	for (line, color) in game_msgs:
+		message = font.render(line,AntiA,color)
+		panel.blit(message,(MSG_X,MSG_Y+(y*FONT_SIZE)))
+		y += 1
+
 
 def render_all():
 	#draw all objects
@@ -352,17 +394,9 @@ def render_all():
 			object.draw()
 		player.draw()
 
-	#window.blit(font.render(player.fighter.hp),TILE_SIZE*MAP_SIZE+20,30)
-	font = pg.font.Font(None, 60)
-	show_hp = font.render(str(player.fighter.hp),True,colors['white'])
-	window.blit(show_hp,(TILE_SIZE*MAP_SIZE+20,30))
-	#max hp
-	font = pg.font.Font(None, 60)
-	show_max = font.render(str(player.fighter.max_hp),True,colors['white'])
-	window.blit(show_max,(TILE_SIZE*MAP_SIZE+20,60))
-
-	render_bar(50,100,300,'HP',player.fighter.hp,player.fighter.max_hp,
+	render_bar(HP_BAR_X,HP_BAR_Y,300,'HP',player.fighter.hp,player.fighter.max_hp,
 			colors['red'],colors['black'])
+	window.blit(panel,(PANEL_X,PANEL_Y))
 
 def is_blocked(x, y):
 	#first test the map tile
@@ -401,6 +435,7 @@ def handle_keys():
 				toggle_fullscreen()
 			elif event.key == K_F7:
 				player.fighter.take_damage(7)
+				message('You deal 7 damage to yourself')
 
 			if game_state == 'playing':
 				if event.key == K_RIGHT:
@@ -443,6 +478,11 @@ playing = True
 
 game_state = 'playing'
 player_action = 'None'
+
+#test messaging
+message('Welcome to the dungeon!',colors['red'])
+message('I hope you enjoy your stay.',colors['blue'])
+
 
 while playing:
 	window.fill(BGCOLOR)
