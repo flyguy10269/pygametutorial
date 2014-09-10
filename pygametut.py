@@ -48,6 +48,7 @@ PANEL_X = TILE_SIZE*MAP_SIZE
 PANEL_Y = 0
 FONT_SIZE = 17
 AntiA = True	#antialiasing
+font = pg.font.Font(None, FONT_SIZE)
 
 #message log settings
 MSG_X = 5
@@ -281,7 +282,6 @@ def make_map():
 	rooms = []
 	num_rooms = 0
 	for r in range(MAX_ROOMS):
-		print r
 		w = random.randint(ROOM_MIN_SIZE, ROOM_MAX_SIZE)
 		h = random.randint(ROOM_MIN_SIZE, ROOM_MAX_SIZE)
 		x = random.randint(0, MAP_SIZE - w - 1)
@@ -364,19 +364,20 @@ def render_bar(x,y,total_width,name,value,maximum,bar_color,back_color):
 	window.blit(panel,(TILE_SIZE*MAP_SIZE,300))
 
 	#text with values
-	font = pg.font.Font(None, FONT_SIZE)
 	text = font.render(name + ': ' +str(value) + '/' + str(maximum),
 		AntiA,colors['white'])
-
 	panel.blit(text,(x+total_width/2,y))
 
-	#display messages
+def render_panel():
+	#display message log
 	y = 1
 	for (line, color) in game_msgs:
 		message = font.render(line,AntiA,color)
 		panel.blit(message,(MSG_X,MSG_Y+(y*FONT_SIZE)))
-		y += 1
+		y+=1
 
+	under_object = font.render(get_names_under_mouse(),AntiA,colors['white'])
+	panel.blit(under_object,(5,5))
 
 def render_all():
 	#draw all objects
@@ -396,6 +397,7 @@ def render_all():
 
 	render_bar(HP_BAR_X,HP_BAR_Y,300,'HP',player.fighter.hp,player.fighter.max_hp,
 			colors['red'],colors['black'])
+	render_panel()
 	window.blit(panel,(PANEL_X,PANEL_Y))
 
 def is_blocked(x, y):
@@ -458,6 +460,21 @@ def handle_keys():
 	#if not keys and not keys.KEYUP:
 	#	return 'noturntaken'
 
+def get_names_under_mouse():
+	global mouse_pos
+	mouse = pg.mouse.get_pos()
+
+	#return a string with the names of all objects under the mouse
+	(x,y) = (mouse)
+	x = x/TILE_SIZE		#set mouse position to local coordinates
+	y = y/TILE_SIZE
+
+	names = [obj.name for obj in objects
+		if obj.x == x and obj.y == y]
+
+	names = ' , '.join(names)	#join the names, seperated by commas
+	return names.capitalize()	#capitalize first letter of names
+
 #FUTURE FOV CALCULATION
 
 
@@ -483,6 +500,8 @@ player_action = 'None'
 message('Welcome to the dungeon!',colors['red'])
 message('I hope you enjoy your stay.',colors['blue'])
 
+# seemingly unnecessary
+#mouse_pos = pg.mouse.get_pos()
 
 while playing:
 	window.fill(BGCOLOR)
