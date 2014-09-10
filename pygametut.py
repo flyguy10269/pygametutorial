@@ -10,6 +10,7 @@ import os
 pg.init()
 #linux
 PLAYER_IMAGE = os.path.join("data","images","snake.png")
+CORPSE_IMAGE = os.path.join("data","images","corpse.png")
 WALL_IMAGE = os.path.join("data","images","wall.png")
 GRASS_IMAGE = os.path.join("data","images","grass.png")
 TROLL_IMAGE = os.path.join("data","images","troll.png")
@@ -40,7 +41,12 @@ MAP_SIZE = 35
 map = []
 LIMIT_FPS = 30
 fpsClock = pg.time.Clock()
+#main surface window
 window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE))
+#GUI side panel
+panel = pg.Surface((500,(TILE_SIZE*MAP_SIZE)))
+
+
 class Tile:
 	def __init__(self, blocked, block_sight = None):
 		self.blocked = blocked
@@ -154,11 +160,11 @@ class BasicMonster:
 		#a basic monster takes its turn.
 		monster = self.owner
 		distance_to_player = monster.distance_to(player)
-		if distance_to_player >=2:
+		if distance_to_player >=2 and distance_to_player <10:
 			monster.move_towards(player.x, player.y)
 
 		#close enough to attack
-		elif player.fighter.hp > 0:
+		elif player.fighter.hp > 0 and distance_to_player <2:
 			monster.fighter.attack(player)
 
 def player_death(player):
@@ -174,6 +180,7 @@ def monster_death(monster):
 	#transform it into a corpse that doesn't block movement
 	print monster.name + ' is dead'
 	monster.image = CORPSE_IMAGE
+	monster.surfaceImage = pg.image.load(CORPSE_IMAGE).convert()
 	monster.blocks = False
 	monster.fighter = None
 	monster.ai = None
@@ -195,25 +202,25 @@ def place_monsters(room):
 
 			if choice <10:
 				#create an orc 10% chance
-				fighter_component = Fighter(hp=10,defense=0,power=3)
+				fighter_component = Fighter(hp=10,defense=0,power=3,death_function=monster_death)
 				ai_component = BasicMonster()
 				monster = Object(x,y,ORC_IMAGE,"orc",blocks=True,
 					fighter = fighter_component,ai=ai_component)
 			elif choice <10+30:
 				#create a troll 30% chance
-				fighter_component = Fighter(hp=10,defense=0,power=2)
+				fighter_component = Fighter(hp=10,defense=0,power=2,death_function=monster_death)
 				ai_component = BasicMonster()
 				monster = Object(x,y,TROLL_IMAGE,"troll",blocks=True,
 					fighter = fighter_component,ai=ai_component)
 			elif choice < 10+30+10:
 				#create skeleton 10% chance
-				fighter_component = Fighter(hp=10,defense=0,power=1)
+				fighter_component = Fighter(hp=10,defense=0,power=1,death_function=monster_death)
 				ai_component = BasicMonster()
 				monster = Object(x,y,SKELETON_IMAGE,"skeleton",blocks=True,
 					fighter=fighter_component,ai=ai_component)
 			else:
 				#create slime 50% chance
-				fighter_component = Fighter(hp=3,defense=0,power=1)
+				fighter_component = Fighter(hp=3,defense=0,power=1,death_function=monster_death)
 				ai_component = BasicMonster()
 				monster = Object(x,y,SLIME_IMAGE,"slime",blocks=True,
 					fighter=fighter_component,ai=ai_component)
@@ -314,7 +321,21 @@ def player_move_or_attack(dx, dy):
 		player.fighter.attack(target)
 	else:
 		player.move(dx, dy)	
-					
+	
+def render_bar(x,y,total_width,name,value,maximum,bar_color,back_color):
+	#clear side panel
+	panel.fill(colors['black'])
+	#render a bar (hp, experience, etc). first calculation the width of the bar
+	bar_width = int(float(value) / maximum * total_width)
+
+	#render the bar on top
+	bar = panel.subsurface(pg.Rect((x,y),(bar_width,20)))
+
+	#testing bar
+	bar.fill(bar_color)
+	window.blit(panel,(TILE_SIZE*MAP_SIZE,300))
+	#centered text with values
+
 def render_all():
 	#draw all objects
 	
@@ -335,6 +356,13 @@ def render_all():
 	font = pg.font.Font(None, 60)
 	show_hp = font.render(str(player.fighter.hp),True,colors['white'])
 	window.blit(show_hp,(TILE_SIZE*MAP_SIZE+20,30))
+	#max hp
+	font = pg.font.Font(None, 60)
+	show_max = font.render(str(player.fighter.max_hp),True,colors['white'])
+	window.blit(show_max,(TILE_SIZE*MAP_SIZE+20,60))
+
+	render_bar(50,100,300,'HP',player.fighter.hp,player.fighter.max_hp,
+			colors['red'],colors['black'])
 
 def is_blocked(x, y):
 	#first test the map tile
@@ -371,6 +399,8 @@ def handle_keys():
 			elif ((event.key == K_RETURN) and 
 							(event.mod&(KMOD_LALT|KMOD_RALT)) != 0):
 				toggle_fullscreen()
+			elif event.key == K_F7:
+				player.fighter.take_damage(7)
 
 			if game_state == 'playing':
 				if event.key == K_RIGHT:
@@ -400,7 +430,7 @@ def handle_keys():
 #screen = pg.display.get_surface()			
 #window.fill((0,205,0),pg.Rect((0,0),(50,50)))
 
-fighter_component = Fighter(hp=30,defense=2,power=50)
+fighter_component = Fighter(hp=30,defense=2,power=50,death_function=player_death)
 player = Object(1,1,PLAYER_IMAGE,'player',blocks=True,fighter=fighter_component)
 objects = [player]
 
