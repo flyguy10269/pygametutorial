@@ -1,4 +1,4 @@
 pygametutorial
 ==============
 
-pygame tutorial making rogulike
+following along libtcod roguelike tutorial to make a game in Pygame
