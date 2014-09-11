@@ -8,7 +8,7 @@ import os
 
 
 pg.init()
-#linux
+
 PLAYER_IMAGE = os.path.join("data","images","snake.png")
 CORPSE_IMAGE = os.path.join("data","images","corpse.png")
 WALL_IMAGE = os.path.join("data","images","wall.png")
@@ -17,11 +17,13 @@ TROLL_IMAGE = os.path.join("data","images","troll.png")
 ORC_IMAGE = os.path.join("data","images","orc.png")
 SLIME_IMAGE = os.path.join("data","images","slime.png")
 SKELETON_IMAGE = os.path.join("data","images","skeleton.png")
+HEALING_POTION_IMAGE = os.path.join("data","images","hp_potion.png")
 
 ROOM_MAX_SIZE = 10
 ROOM_MIN_SIZE = 4
 MAX_ROOMS = 30
 MAX_ROOM_MONSTERS=3
+MAX_ROOM_ITEMS=2
 
 fullscreen = False
 
@@ -30,7 +32,11 @@ colors = {
 			'blue':(0,0,205),
 			'red':(205,0,0),
 			'black':(0,0,0),
-			'white':(205,205,205)
+			'white':(205,205,205),
+			'orange':(255,128,0),
+			'pink':(255,0,255),
+			'lightblue':(0,255,255),
+			'grey':(128,128,128)
 			}
 
 BGCOLOR = colors['black']
@@ -95,13 +101,16 @@ class Rect:
 					self.y1 <= other.y2 and self.y2 >= other.y1)
 		
 class Object:
-	def __init__(self, x, y, image,name, blocks=False, fighter=None, ai=None):
+	def __init__(self, x, y, image,name, blocks=False, fighter=None, ai=None, item=None):
 		self.x = x
 		self.y = y
 		self.image = image
 		self.surfaceImage = pg.image.load(image).convert()
 		self.name = name
 		self.blocks = blocks
+		self.item = item
+		if self.item:	#let the item component know who owns it
+			self.item.owner = self
 
 		self.fighter = fighter
 		if self.fighter: #let the fighter component know who owns it
@@ -145,6 +154,18 @@ class Object:
 	def clear(self):
 		window.fill(BGCOLOR,pg.Rect((self.x,self.y),(TILE_SIZE,TILE_SIZE)))
 
+class Item:
+	#an item that can be picked up and used
+	def pick_up(self):
+		#add to the player's inventory and remove from the map
+		if len(inventory) >= 26:
+			message('Your inventory is full, cannot pick up ' + self.owner.name + 
+				'.', colors['lightblue'])
+		else:
+			inventory.append(self.owner)
+			objects.remove(self.owner)
+			message('you picked up a ' + self.owner.name + '!',colors['green'])
+
 class Fighter():
 	#combat related properties and methods
 	def __init__(self, hp, defense, power,death_function=None):
@@ -170,7 +191,7 @@ class Fighter():
 		if damage > 0:
 			#make the target take some damage
 			message(self.owner.name + ' attacks ' + target.name + ' for ' + str(damage) + ' hit points',
-				colors['red'])
+				colors['orange'])
 			target.fighter.take_damage(damage)
 		else:
 			message(self.owner.name + ' attacks ' + target.name + ' but it has no effect',colors['blue'])
@@ -215,8 +236,8 @@ def place_monsters(room):
 
 	for r in range(num_monsters):
 		#choose random spot for this monster
-		x = random.randint(room.x1, room.x2)
-		y = random.randint(room.y1, room.y2)
+		x = random.randint(room.x1+1, room.x2-1)
+		y = random.randint(room.y1+1, room.y2-1)
 
 		if not is_blocked(x, y):
 
@@ -247,6 +268,22 @@ def place_monsters(room):
 				monster = Object(x,y,SLIME_IMAGE,"slime",blocks=True,
 					fighter=fighter_component,ai=ai_component)
 			objects.append(monster)
+
+def place_items(room):
+	num_items = random.randint(0,MAX_ROOM_ITEMS)
+	for i in range(num_items):
+		#choose a random spot for items
+		x = random.randint(room.x1+1, room.x2-1)
+		y = random.randint(room.y1+1, room.y2-1)
+
+		#only place an item if the tile is not blocked
+		if not is_blocked(x, y):
+			#create a healing potion
+			item_component = Item()
+			item = Object(x, y, HEALING_POTION_IMAGE,'healing potion',item=item_component)
+
+			objects.append(item)
+			item.send_to_back()	#items appear below other objects
 
 def random_percentage():
 
@@ -307,6 +344,7 @@ def make_map():
 			
 			else:
 				place_monsters(new_room)
+				place_items(new_room)
 				#all rooms after the first
 				(prev_x, prev_y) = rooms[num_rooms -1].center()
 				
@@ -376,6 +414,7 @@ def render_panel():
 		panel.blit(message,(MSG_X,MSG_Y+(y*FONT_SIZE)))
 		y+=1
 
+	#draw name of object under the mouse
 	under_object = font.render(get_names_under_mouse(),AntiA,colors['white'])
 	panel.blit(under_object,(5,5))
 
@@ -438,6 +477,12 @@ def handle_keys():
 			elif event.key == K_F7:
 				player.fighter.take_damage(7)
 				message('You deal 7 damage to yourself')
+			elif event.key == K_g:
+				#pick up an item
+				for object in objects:	#look for an item in the players tile
+					if object.x == player.x and object.y == player.y and object.item:
+						object.item.pick_up()
+						break
 
 			if game_state == 'playing':
 				if event.key == K_RIGHT:
@@ -473,6 +518,11 @@ def get_names_under_mouse():
 		if obj.x == x and obj.y == y]
 
 	names = ' , '.join(names)	#join the names, seperated by commas
+
+	#display names by mouse cursor
+	under_object = font.render(names.capitalize(),AntiA,colors['black'])
+	window.blit(under_object,(mouse[0]+15,mouse[1]))
+
 	return names.capitalize()	#capitalize first letter of names
 
 #FUTURE FOV CALCULATION
@@ -485,6 +535,7 @@ def get_names_under_mouse():
 fighter_component = Fighter(hp=30,defense=2,power=50,death_function=player_death)
 player = Object(1,1,PLAYER_IMAGE,'player',blocks=True,fighter=fighter_component)
 objects = [player]
+inventory = []
 
 make_map()
 wallSurface = pg.image.load(WALL_IMAGE).convert()
