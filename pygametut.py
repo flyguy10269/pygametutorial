@@ -27,6 +27,8 @@ MAX_ROOM_ITEMS=2
 
 fullscreen = False
 
+#items
+HP_POTION_AMOUNT = 5
 colors = {
 			'green':(0,205,0),
 			'blue':(0,0,205),
@@ -155,6 +157,17 @@ class Object:
 		window.fill(BGCOLOR,pg.Rect((self.x,self.y),(TILE_SIZE,TILE_SIZE)))
 
 class Item:
+	def __init__(self, use_function=None):
+		self.use_function = use_function
+
+	def use(self):
+		#call use_function if it is defined
+		if self.use_function is None:
+			message('The ' + self.ownder.name + ' cannot be used.')
+		else:
+			if self.use_function() != 'cancelled':
+				inventory.remove(self.owner) #destroy after use, unless cancelled
+
 	#an item that can be picked up and used
 	def pick_up(self):
 		#add to the player's inventory and remove from the map
@@ -183,6 +196,12 @@ class Fighter():
 			function = self.death_function
 			if function is not None:
 				function(self.owner)
+
+	def heal(self, amount):
+		#heal by the given amount without going over the maximum
+		self.hp += amount
+		if self.hp > self.max_hp:
+			self.hp = self.max_hp
 
 	def attack(self, target):
 		#a simple formula for attack damage
@@ -279,11 +298,20 @@ def place_items(room):
 		#only place an item if the tile is not blocked
 		if not is_blocked(x, y):
 			#create a healing potion
-			item_component = Item()
+			item_component = Item(use_function=cast_heal)
 			item = Object(x, y, HEALING_POTION_IMAGE,'healing potion',item=item_component)
 
 			objects.append(item)
 			item.send_to_back()	#items appear below other objects
+
+def cast_heal():
+	#heal the player
+	if player.fighter.hp == player.fighter.max_hp:
+		message('You are already at full health', colors['red'])
+		return 'cancelled'
+
+	message('Your wounds start to feel better!'), colors['blue']
+	player.fighter.heal(HP_POTION_AMOUNT)
 
 def random_percentage():
 
@@ -418,6 +446,41 @@ def render_panel():
 	under_object = font.render(get_names_under_mouse(),AntiA,colors['white'])
 	panel.blit(under_object,(5,5))
 
+def menu(x,y, header, options):
+	if len(options) > 26: raise ValueError('Cannot have a menu with more than 26 options.')
+
+	#calculate the height of the header after auto wrap and one line per option
+	header_height = FONT_SIZE + 5
+	height = len(options)*FONT_SIZE + header_height
+
+	#print all options
+	y = header_height
+	letter_index = ord('a')
+	for option_text in options:
+		text = font.render('(' + chr(letter_index) + ') ' + option_text,AntiA, colors['white'])
+		window.blit(text,(x,y+(y*FONT_SIZE)))
+		y+=1
+		letter_index += 1
+
+	#wait for a keypress
+	selection = wait()
+
+	#convert the ASCII code to an index; if it corresponds to an option, return it
+	index = selection - ord('a')
+	if index >= 0 and index < len(options): return index
+	return None
+
+def inventory_menu(header):
+	#show a menu with each item of the inventory as an option
+	if len(inventory) == 0:
+		options = ['Inventory is empty.']
+	else:
+		options = [item.name for item in inventory]
+	index = menu(200,200,header, options)
+
+	if index is None or len(inventory) == 0: return None
+	return inventory[index].item
+
 def render_all():
 	#draw all objects
 	
@@ -462,6 +525,14 @@ def toggle_fullscreen():
 		window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE))
 		fullscreen = False
 
+def wait():
+	while True:
+		for event in pg.event.get():
+			if event.type == KEYDOWN:
+				print 'leaving menu'
+				return event.key
+		pg.display.update()
+
 def handle_keys():
 	player_choice = None
 	keys = pg.event.get()
@@ -483,6 +554,11 @@ def handle_keys():
 					if object.x == player.x and object.y == player.y and object.item:
 						object.item.pick_up()
 						break
+			elif event.key == K_i:
+				#show inventory; if an item is selected, use it
+				chosen_item = inventory_menu('Press the key next to an item to use it or any other key to cancel')
+				if chosen_item is not None:
+					chosen_item.use
 
 			if game_state == 'playing':
 				if event.key == K_RIGHT:
