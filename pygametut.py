@@ -25,7 +25,7 @@ MAX_ROOMS = 30
 MAX_ROOM_MONSTERS=3
 MAX_ROOM_ITEMS=2
 
-fullscreen = False
+fullscreen = True
 
 #items
 HP_POTION_AMOUNT = 5
@@ -44,8 +44,11 @@ colors = {
 BGCOLOR = colors['black']
 
 #SCREEN SIZING
+infoObject = pg.display.Info()
+
+
 TILE_SIZE = 28
-MAP_SIZE = 35
+MAP_SIZE = infoObject.current_h/TILE_SIZE
 map = []
 LIMIT_FPS = 30
 fpsClock = pg.time.Clock()
@@ -70,7 +73,8 @@ HP_BAR_X = 50
 HP_BAR_Y = 500
 
 #main surface window
-window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE))
+window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE),
+	pg.FULLSCREEN)
 #GUI side panel
 panel = pg.Surface((500,(TILE_SIZE*MAP_SIZE)))
 
@@ -337,6 +341,7 @@ def create_v_tunnel(y1,y2,x):
 		map[x][y].block_sight = False
 		
 def make_map():
+	print MAP_SIZE
 	print "making map"
 	global map
 	
@@ -522,6 +527,7 @@ def toggle_fullscreen():
 					pg.FULLSCREEN)
 		fullscreen = True
 	else:
+		print 'unfullscreening'
 		window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE))
 		fullscreen = False
 
