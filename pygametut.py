@@ -3,8 +3,11 @@ import pygame as pg
 from pygame.locals import *
 import math
 import textwrap
-import shelve
+# import shelve
 import os
+
+#import so pygame2exe functions correctly?
+import pygame._view
 
 
 pg.init()
