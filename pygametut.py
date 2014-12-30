@@ -21,6 +21,7 @@ ORC_IMAGE = os.path.join("data","images","orc.png")
 SLIME_IMAGE = os.path.join("data","images","slime.png")
 SKELETON_IMAGE = os.path.join("data","images","skeleton.png")
 HEALING_POTION_IMAGE = os.path.join("data","images","hp_potion.png")
+LIGHTNING_SCROLL_IMAGE = os.path.join("data","images","lightning_scroll.png")
 
 ROOM_MAX_SIZE = 10
 ROOM_MIN_SIZE = 4
@@ -32,6 +33,11 @@ fullscreen = True
 
 #items
 HP_POTION_AMOUNT = 5
+
+#SCROLL OF LIGHTNING
+LIGHTNING_DAMAGE=20
+LIGHTNING_RANGE=5 
+
 colors = {
 			'green':(0,205,0),
 			'blue':(0,0,205),
@@ -76,8 +82,10 @@ HP_BAR_X = 50
 HP_BAR_Y = 500
 
 #main surface window
-window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE),
-	pg.FULLSCREEN)
+if fullscreen == True:
+	window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE),pg.FULLSCREEN)
+else:
+	window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE))
 #GUI side panel
 panel = pg.Surface((500,(TILE_SIZE*MAP_SIZE)))
 
@@ -170,7 +178,7 @@ class Item:
 	def use(self):
 		#call use_function if it is defined
 		if self.use_function is None:
-			message('The ' + self.ownder.name + ' cannot be used.')
+			message('The ' + self.owner.name + ' cannot be used.')
 		else:
 			if self.use_function() != 'cancelled':
 				inventory.remove(self.owner) #destroy after use, unless cancelled
@@ -304,9 +312,27 @@ def place_items(room):
 
 		#only place an item if the tile is not blocked
 		if not is_blocked(x, y):
-			#create a healing potion
-			item_component = Item(use_function=cast_heal)
-			item = Object(x, y, HEALING_POTION_IMAGE,'healing potion',item=item_component)
+			choice = random_percentage()
+			if choice <30:
+				#create a healing potion
+				item_component = Item(use_function=cast_heal)
+				item = Object(x,y,HEALING_POTION_IMAGE,'healing potion',item=item_component)
+			
+			elif choice <30+15:
+				#create scroll of lightning
+				item_component = Item(use_function=cast_lightning)
+				item = Object(x,y,LIGHTNING_SCROLL_IMAGE,'scroll of lightning',item=item_component)
+			
+			elif choice <30+15+20:
+				#create scroll of confusion
+				
+			elif choice <30+15+15+20:
+				#create scroll of ice lance
+				
+			else:
+				#create scroll of fireball
+				
+				
 
 			objects.append(item)
 			item.send_to_back()	#items appear below other objects
@@ -314,12 +340,37 @@ def place_items(room):
 def cast_heal():
 	#heal the player
 	if player.fighter.hp == player.fighter.max_hp:
+		print('at full health')
 		message('You are already at full health', colors['red'])
 		return 'cancelled'
 
-	message('Your wounds start to feel better!'), colors['blue']
+	message('Your wounds start to feel better!', colors['blue'])
 	player.fighter.heal(HP_POTION_AMOUNT)
 
+def cast_lightning():
+	#find closest enemy
+	monster = closest_monster(LIGHTNING_RANGE)
+	if monster is None:	#no monster found within range
+		message('no monster found within range')
+		return 'cancelled'
+		
+	#zap it!
+	message('A lightning bolt strikes the ' + monster.name + ' for ' + str(LIGHTNING_DAMAGE),colors['red'])
+	monster.fighter.take_damage(LIGHTNING_DAMAGE)
+
+def closest_monster(max_range):
+		#find the closest monster to the player
+		closest_enemy = None
+		closest_dist = max_range + 1 #start with a slightly larger range
+		
+		for object in objects:
+			if object.fighter and not object == player:
+				#find the distance between selected object and the player
+				dist = player.distance_to(object)
+				if dist < closest_dist:	#closer than previous
+					closest_enemy = object
+					closest_dist = dist
+		return closest_enemy
 def random_percentage():
 
 	return (random.randint(0,100))
@@ -419,7 +470,7 @@ def message(new_msg, color = colors['white']):
 		#if the buffer is full, remove the first line
 		if len(game_msgs) == MSG_HEIGHT:
 			del game_msgs[0]
-			print('message redacted')
+			#print('message redacted')
 
 		#add the new line as a tuple, with the text and color
 		game_msgs.append((line, color))
@@ -475,7 +526,9 @@ def menu(x,y, header, options):
 
 	#convert the ASCII code to an index; if it corresponds to an option, return it
 	index = selection - ord('a')
-	if index >= 0 and index < len(options): return index
+	if index >= 0 and index < len(options): 
+		return index
+		
 	return None
 
 def inventory_menu(header):
@@ -487,7 +540,7 @@ def inventory_menu(header):
 	index = menu(200,200,header, options)
 
 	if index is None or len(inventory) == 0: return None
-	return inventory[index].item
+	return inventory[index]
 
 def render_all():
 	#draw all objects
@@ -538,7 +591,6 @@ def wait():
 	while True:
 		for event in pg.event.get():
 			if event.type == KEYDOWN:
-				print 'leaving menu'
 				return event.key
 		pg.display.update()
 
@@ -567,7 +619,10 @@ def handle_keys():
 				#show inventory; if an item is selected, use it
 				chosen_item = inventory_menu('Press the key next to an item to use it or any other key to cancel')
 				if chosen_item is not None:
-					chosen_item.use
+					#print('using ' + chosen_item.name)
+					chosen_item.item.use()
+			elif event.key == K_F8:
+				cast_heal()
 
 			if game_state == 'playing':
 				if event.key == K_RIGHT:
