@@ -3,7 +3,7 @@ import pygame as pg
 from pygame.locals import *
 import math
 import textwrap
-# import shelve
+import shelve
 import os
 
 #import so pygame2exe functions correctly?
@@ -22,6 +22,9 @@ SLIME_IMAGE = os.path.join("data","images","slime.png")
 SKELETON_IMAGE = os.path.join("data","images","skeleton.png")
 HEALING_POTION_IMAGE = os.path.join("data","images","hp_potion.png")
 LIGHTNING_SCROLL_IMAGE = os.path.join("data","images","lightning_scroll.png")
+CONFUSE_SCROLL_IMAGE = os.path.join("data","images","confuse_scroll.png")
+FIREBALL_SCROLL_IMAGE = os.path.join("data","images","fireball_scroll.png")
+
 
 ROOM_MAX_SIZE = 10
 ROOM_MIN_SIZE = 4
@@ -29,7 +32,7 @@ MAX_ROOMS = 30
 MAX_ROOM_MONSTERS=3
 MAX_ROOM_ITEMS=2
 
-fullscreen = True
+fullscreen = False
 
 #items
 HP_POTION_AMOUNT = 5
@@ -37,6 +40,15 @@ HP_POTION_AMOUNT = 5
 #SCROLL OF LIGHTNING
 LIGHTNING_DAMAGE=20
 LIGHTNING_RANGE=5 
+
+#SCROLL OF CONFUSION
+CONFUSE_RANGE = 7
+CONFUSED_NUM_TURNS = 10
+
+#SCROLL OF FIREBALL
+FIREBALL_RADIUS = 3
+FIREBALL_DAMAGE = 12
+FIREBALL_RANGE = 8
 
 colors = {
 			'green':(0,205,0),
@@ -81,11 +93,7 @@ game_msgs = []
 HP_BAR_X = 50
 HP_BAR_Y = 500
 
-#main surface window
-if fullscreen == True:
-	window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE),pg.FULLSCREEN)
-else:
-	window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE))
+
 #GUI side panel
 panel = pg.Surface((500,(TILE_SIZE*MAP_SIZE)))
 
@@ -122,7 +130,6 @@ class Object:
 		self.x = x
 		self.y = y
 		self.image = image
-		self.surfaceImage = pg.image.load(image).convert()
 		self.name = name
 		self.blocks = blocks
 		self.item = item
@@ -159,6 +166,10 @@ class Object:
 		dy = other.y - self.y
 		return math.sqrt(dx ** 2 + dy **2)
 
+	def distance(self, x, y):
+		#return the distance to some coordinates
+		return math.sqrt((x - self.x) ** 2 + (y - self.y) ** 2)
+		
 	def send_to_back(self):
 		#move object to be drawn first so other objects will display above
 		global objects
@@ -166,7 +177,8 @@ class Object:
 		objects.insert(0,self)
 		
 	def draw(self):
-		window.blit(self.surfaceImage, (self.x*TILE_SIZE, self.y*TILE_SIZE))
+		surfaceImage = pg.image.load(self.image).convert()
+		window.blit(surfaceImage, (self.x*TILE_SIZE, self.y*TILE_SIZE))
 	
 	def clear(self):
 		window.fill(BGCOLOR,pg.Rect((self.x,self.y),(TILE_SIZE,TILE_SIZE)))
@@ -194,6 +206,14 @@ class Item:
 			objects.remove(self.owner)
 			message('you picked up a ' + self.owner.name + '!',colors['green'])
 
+	def drop(self):
+		#add to the map and remove from player's inventory
+		objects.append(self.owner)
+		inventory.remove(self.owner)
+		self.owner.x = player.x
+		self.owner.y = player.y
+		message('You dropped a '+self.owner.name+'.',colors['blue'])
+		
 class Fighter():
 	#combat related properties and methods
 	def __init__(self, hp, defense, power,death_function=None):
@@ -242,6 +262,21 @@ class BasicMonster:
 		#close enough to attack
 		elif player.fighter.hp > 0 and distance_to_player <2:
 			monster.fighter.attack(player)
+
+class ConfusedMonster:
+	def __init__(self, old_ai, num_turns=CONFUSED_NUM_TURNS):
+		self.old_ai = old_ai
+		self.num_turns = num_turns
+		
+	def take_turn(self):
+		if self.num_turns > 0: #still confused
+			#move in a random direction
+			self.owner.move(random.randint(-1,1),random.randint(-1,1))
+			self.num_turns -= 1
+			
+		else:	#restore previous AI
+			self.owner.ai = self.old_ai
+			message('The ' + self.owner.name + ' is no longer confused',colors['blue'])
 
 def player_death(player):
 	#the game ended
@@ -325,12 +360,16 @@ def place_items(room):
 			
 			elif choice <30+15+20:
 				#create scroll of confusion
+				item_component = Item(use_function=cast_confusion)
+				item = Object(x,y,CONFUSE_SCROLL_IMAGE,'scroll of confusion',item=item_component)
 				
-			elif choice <30+15+15+20:
+#			elif choice <30+15+15+20:
 				#create scroll of ice lance
 				
 			else:
 				#create scroll of fireball
+				item_component = Item(use_function=cast_fireball)
+				item = Object(x,y,FIREBALL_SCROLL_IMAGE,'scroll of fireball',item=item_component)
 				
 				
 
@@ -358,6 +397,30 @@ def cast_lightning():
 	message('A lightning bolt strikes the ' + monster.name + ' for ' + str(LIGHTNING_DAMAGE),colors['red'])
 	monster.fighter.take_damage(LIGHTNING_DAMAGE)
 
+def cast_confusion():
+	#target monster
+	message('Left-click to select, Right-click to cancel')
+	monster = target_monster(CONFUSE_RANGE)
+	if monster is None: return 'cancelled'
+
+	#replace the monster's ai with a confused ai
+	old_ai = monster.ai
+	monster.ai = ConfusedMonster(old_ai)
+	monster.ai.owner = monster	#tell the new component who owns it
+	message('The ' + monster.name + 'starts to stumble around',colors['blue'])
+
+def cast_fireball():
+	#ask the player for a target tile to throw fireball at
+	message('Left-click a target tile or right-click to cancel.')
+	(x,y) = target_tile(FIREBALL_RANGE)
+	if x is None: return 'cancelled'
+	message('The fireball explodes!',colors['red'])
+	
+	for obj in objects:	#damage every fighter within range, including player
+		if obj.distance(x,y) <= FIREBALL_RADIUS and obj.fighter:
+			message('The ' + obj.name + ' gets burned.')
+			obj.fighter.take_damage(FIREBALL_DAMAGE)
+			
 def closest_monster(max_range):
 		#find the closest monster to the player
 		closest_enemy = None
@@ -371,6 +434,7 @@ def closest_monster(max_range):
 					closest_enemy = object
 					closest_dist = dist
 		return closest_enemy
+
 def random_percentage():
 
 	return (random.randint(0,100))
@@ -397,7 +461,10 @@ def create_v_tunnel(y1,y2,x):
 def make_map():
 	print MAP_SIZE
 	print "making map"
-	global map
+	global map, objects
+	
+	#the list of objects 
+	objects = [player]
 	
 	map = [[Tile(True)
 				for y in range(MAP_SIZE)]
@@ -475,6 +542,9 @@ def message(new_msg, color = colors['white']):
 		#add the new line as a tuple, with the text and color
 		game_msgs.append((line, color))
 
+def msgbox(text, width=50):
+	menu(250,2,text,[]) #use menu() as a sort of message box
+	
 def render_bar(x,y,total_width,name,value,maximum,bar_color,back_color):
 	#clear side panel
 	panel.fill(colors['black'])
@@ -511,9 +581,11 @@ def menu(x,y, header, options):
 	#calculate the height of the header after auto wrap and one line per option
 	header_height = FONT_SIZE + 5
 	height = len(options)*FONT_SIZE + header_height
-
+	header = font.render(header,AntiA, colors['red'])
+	window.blit(header,(x,y))
 	#print all options
 	y = header_height
+	print x,y
 	letter_index = ord('a')
 	for option_text in options:
 		text = font.render('(' + chr(letter_index) + ') ' + option_text,AntiA, colors['white'])
@@ -540,7 +612,7 @@ def inventory_menu(header):
 	index = menu(200,200,header, options)
 
 	if index is None or len(inventory) == 0: return None
-	return inventory[index]
+	return inventory[index].item
 
 def render_all():
 	#draw all objects
@@ -620,9 +692,20 @@ def handle_keys():
 				chosen_item = inventory_menu('Press the key next to an item to use it or any other key to cancel')
 				if chosen_item is not None:
 					#print('using ' + chosen_item.name)
-					chosen_item.item.use()
+					chosen_item.use()
 			elif event.key == K_F8:
 				cast_heal()
+			elif event.key == K_d:
+				#show the inventory; if an item is selected drop it
+				chosen_item = inventory_menu('select item to be dropped')
+				if chosen_item is not None:
+					chosen_item.drop()
+					
+			#give item change for different item
+			elif event.key == K_F9:
+				item_component = Item(use_function=cast_fireball)
+				item = Object(2,2,FIREBALL_SCROLL_IMAGE,'scroll of fireball',item=item_component)
+				inventory.append(item)
 
 			if game_state == 'playing':
 				if event.key == K_RIGHT:
@@ -642,8 +725,6 @@ def handle_keys():
 
 	if player_choice != 'moved':
 		return 'noturntaken'
-	#if not keys and not keys.KEYUP:
-	#	return 'noturntaken'
 
 def get_names_under_mouse():
 	global mouse_pos
@@ -665,49 +746,172 @@ def get_names_under_mouse():
 
 	return names.capitalize()	#capitalize first letter of names
 
+def target_monster(max_range=None):
+	#returns a clicked monster or None if right-clicked
+	while True:
+		(x,y) = target_tile(max_range)
+		if x is None: #player cancelled
+			return None
+		#return the first clicked monster, otherwise continue loooping
+		for obj in objects:
+			if obj.x == x and obj.y == y and obj.fighter and obj != player:
+				return obj
+				
+def target_tile(max_range = None):
+	global key
+	while True:
+		#render screen to erase inventory
+		pg.display.update()
+		render_all()
+		
+		for event in pg.event.get():
+			if event.type == KEYDOWN and event.key == K_ESCAPE:
+				message('action cancelled')
+				return (None, None)
+			if event.type == MOUSEBUTTONDOWN:
+				(x,y) = pg.mouse.get_pos()
+				x = x/TILE_SIZE
+				y = y/TILE_SIZE
+
+				if event.button == 1:
+					if max_range is None or player.distance(x,y) <= max_range:
+						return(x,y)
+					else:
+						message('Target out of range')
+				if event.button == 3:
+					message('action cancelled')
+					return (None, None)
+
+					
+					
+"""
+new game and initializing and loading 
+junk like that
+"""
+def new_game():
+	global player, inventory, game_msgs, game_state
+
+	
+	#create player
+	fighter_component = Fighter(hp=30,defense=2,power=50,death_function=player_death)
+	player = Object(1,1,PLAYER_IMAGE,'player',blocks=True,fighter=fighter_component)
+	
+	#generate map 
+	make_map()
+	#initializeFOV()
+	game_state = 'playing'
+	inventory = []
+	
+	#create the list of game messages
+	game_msgs = []
+	
+	#welcome message
+	message('Welcome to the dungeon!',colors['red'])
+	message('I hope you enjoy your stay.',colors['blue'])
+
 #FUTURE FOV CALCULATION
+#initializeFOV():
 
+def play_game():
+	global key, mouse, playing, wallSurface, grassSurface
+	wallSurface = pg.image.load(WALL_IMAGE).convert()
+	grassSurface = pg.image.load(GRASS_IMAGE).convert()
+	
+	#main surface window
+	if fullscreen == True:
+		window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE),pg.FULLSCREEN)
+	else:
+		window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE))
+	player_action = None
+	"""
+	maybe not needed
+	mouse = pg.mouse
+	key = key nonsense
+	"""
+	
+	pg.display.update()
+	playing = True
+	while playing:
+		#render the screen
+		window.fill(BGCOLOR)
+		render_all()
+		
+		player_action = handle_keys()
+		if player_action == 'exit':
+			save_game()
+			playing = False
+		#let monsters take their turns
+		if game_state == 'playing' and player_action != 'noturntaken' and player_action != 'exit':
+			for object in objects:
+				if object.ai:
+					object.ai.take_turn()
+		pg.display.update()
+		fpsClock.tick(LIMIT_FPS)
 
+def save_game():
+	#open a new empty shelve overwritting an old one
+	file = shelve.open('savegame', 'n')
+	file['map'] = map
+	file['objects'] = objects
+	file['player_index'] = objects.index(player) #index of player in objects list
+	file['inventory'] = inventory
+	file['game_msgs'] = game_msgs
+	file['game_state'] = game_state
+	file.close()
+	
+def load_game():
+	#open the previously saved shelve and load data
+	global map, objects, player, inventory, game_msgs, game_state
+	
+	file = shelve.open('savegame', 'r')
+	map = file['map']
+	objects = file['objects']
+	player = objects[file['player_index']] #get index of player in objects
+	inventory = file['inventory']
+	game_msgs = file['game_msgs']
+	game_state = file['game_state']
+	file.close()
+	
+def main_menu():
+	global window
+	window = pg.display.set_mode((600,500))
+	bckgndSurface = pg.image.load(os.path.join("data","images","menu_background.png")).convert()
+	window.blit(bckgndSurface,(0,0))
+	while True:
+		choice = menu(250,12,'main menu',['Play a new game',
+											'Continue last game',
+											'Quit'])
+		if choice == 0: #new game
+			new_game()
+			play_game()
+			
+		elif choice == 1: #continue
+			try:
+				load_game()
+			except:
+				msgbox('\n No saved game to load.\n',24)
+				continue
+			play_game()
+			
+		elif choice == 2: #quit
+			break
 
-#screen = pg.display.get_surface()			
-#window.fill((0,205,0),pg.Rect((0,0),(50,50)))
-
-fighter_component = Fighter(hp=30,defense=2,power=50,death_function=player_death)
-player = Object(1,1,PLAYER_IMAGE,'player',blocks=True,fighter=fighter_component)
-objects = [player]
-inventory = []
-
-make_map()
-wallSurface = pg.image.load(WALL_IMAGE).convert()
-grassSurface = pg.image.load(GRASS_IMAGE).convert()
-
-pg.display.update()
-playing = True
 
 game_state = 'playing'
 player_action = 'None'
 
-#test messaging
-message('Welcome to the dungeon!',colors['red'])
-message('I hope you enjoy your stay.',colors['blue'])
+main_menu()
 
-# seemingly unnecessary
-#mouse_pos = pg.mouse.get_pos()
+"""	
+EXAMPLES FROM TUTORIAL FOR THINGS TO CHANGE OR ADD
+---------------AI--------------------------
+ai to have a state system to know behaviours
+class DragonAI:
+	def __init__(self):
+		self.state = 'chasing'
+	def take_turn(self):
+		if self.state == 'chasing': ...
+		elif self.state == 'charging-fire-breath':...
 
-while playing:
-	window.fill(BGCOLOR)
-	render_all()
-	
-	player_action = handle_keys()
-
-	#print player_action
-
-	if player_action == 'exit':
-		playing = False
-	#let mosnters take their turn
-	if game_state == 'playing' and player_action != 'noturntaken' and player_action != 'exit':
-		for object in objects:
-			if object.ai:
-				object.ai.take_turn()
-	pg.display.update()
-	fpsClock.tick(LIMIT_FPS)
+-----------------------------------------------------
+"""
