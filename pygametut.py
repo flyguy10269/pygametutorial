@@ -27,6 +27,7 @@ LIGHTNING_SCROLL_IMAGE = os.path.join("data","images","lightning_scroll.png")
 CONFUSE_SCROLL_IMAGE = os.path.join("data","images","confuse_scroll.png")
 FIREBALL_SCROLL_IMAGE = os.path.join("data","images","fireball_scroll.png")
 STAIRS_IMAGE = os.path.join("data","images","stairs.png")
+SWORD_IMAGE = os.path.join("data","images","sword.png")
 
 
 ROOM_MAX_SIZE = 10
@@ -78,6 +79,19 @@ colors = {
 			'yellow':(255,255,0)
 			}
 
+monster_chances = {
+	'orc': 30, 
+	'troll': 20,
+	'skeleton': 25,
+	'slime': 50}
+	
+item_chances = {
+	'heal': 70,
+	'lightning':10,
+	'fireball': 10,
+	'confuse': 10,
+	'sword': 25}
+	
 BGCOLOR = colors['black']
 
 #SCREEN SIZING
@@ -113,6 +127,10 @@ HP_BAR_Y = 500
 XP_BAR_X = 50
 XP_BAR_Y = 530
 
+#FLOOR DISPLAY
+CURRENT_FLOOR_X = 5
+CURRENT_FLOOR_Y = 5
+
 
 #GUI side panel
 panel = pg.Surface((500,(TILE_SIZE*MAP_SIZE)))
@@ -146,13 +164,19 @@ class Rect:
 					self.y1 <= other.y2 and self.y2 >= other.y1)
 		
 class Object:
-	def __init__(self, x, y, image,name, blocks=False, fighter=None, ai=None, item=None):
+	def __init__(self, x, y, image,name, blocks=False, fighter=None, ai=None, item=None, equipment=None):
 		self.x = x
 		self.y = y
 		self.image = image
 		self.name = name
 		self.blocks = blocks
 		self.item = item
+		self.equipment = equipment
+		if self.equipment: #let it know who owns it
+			self.equipment.owner = self
+			self.item = Item()
+			self.item.ownder = self
+			
 		if self.item:	#let the item component know who owns it
 			self.item.owner = self
 
@@ -208,6 +232,11 @@ class Item:
 		self.use_function = use_function
 
 	def use(self):
+		#if equipment "use" action is equip/dequip
+		if self.owner.equipment:
+			self.owner.equipment.toggle_equip()
+			return
+			
 		#call use_function if it is defined
 		if self.use_function is None:
 			message('The ' + self.owner.name + ' cannot be used.')
@@ -225,6 +254,10 @@ class Item:
 			inventory.append(self.owner)
 			objects.remove(self.owner)
 			message('you picked up a ' + self.owner.name + '!',colors['green'])
+			#special case: automatically equip if slot is not in use
+			equipment = self.owner.equipment
+			if equipment and get_equipped_in_slot(equipment.slot) is None:
+				equipment.equip()
 
 	def drop(self):
 		#add to the map and remove from player's inventory
@@ -232,7 +265,37 @@ class Item:
 		inventory.remove(self.owner)
 		self.owner.x = player.x
 		self.owner.y = player.y
+		#special case: equipped items become unequipped
+		if self.owner.equipment:
+			self.owner.equipment.dequip()
 		message('You dropped a '+self.owner.name+'.',colors['blue'])
+
+class Equipment:
+	#an object that can be equipped
+	def __init__(self, slot):
+		self.slot = slot
+		self.is_equipped = False
+		
+	def toggle_equip(self):	#toggle equip/dequip status
+		if self.is_equipped:
+			self.dequip()
+		else:
+			self.equip()
+		
+	def equip(self):
+		old_equipment = get_equipped_in_slot(self.slot)
+		if old_equipment is not None:
+			old_equipment.dequip()
+			
+		#equip object and show a message about it
+		self.is_equipped = True
+		message('Equipped ' + self.owner.name + ' on ' + self.slot)
+		
+	def dequip(self):
+		#dequip object and show a message about it
+		if not self.is_equipped:	return
+		self.is_equipped = False
+		message('Unequipped ' + self.owner.name + ' from ' + self.slot)
 		
 class Fighter():
 	#combat related properties and methods
@@ -301,6 +364,12 @@ class ConfusedMonster:
 			self.owner.ai = self.old_ai
 			message('The ' + self.owner.name + ' is no longer confused',colors['blue'])
 
+def get_equipped_in_slot(slot):	#returns equipment in a slot
+	for obj in inventory:
+		if obj.equipment and obj.equipment.slot == slot and obj.equipment.is_equipped:
+			return obj.equipment
+		return None
+		
 def player_death(player):
 	#the game ended
 	global game_state
@@ -332,27 +401,26 @@ def place_monsters(room):
 
 		if not is_blocked(x, y):
 
-			choice = random_percentage()
-
-			if choice <10:
+			choice = random_choice(monster_chances)
+			if choice =='orc':
 				#create an orc 10% chance
 				fighter_component = Fighter(hp=10,defense=0,power=3,xp=30,death_function=monster_death)
 				ai_component = BasicMonster()
 				monster = Object(x,y,ORC_IMAGE,"orc",blocks=True,
 					fighter = fighter_component,ai=ai_component)
-			elif choice <10+30:
+			elif choice =='troll':
 				#create a troll 30% chance
 				fighter_component = Fighter(hp=10,defense=0,power=2,xp=25,death_function=monster_death)
 				ai_component = BasicMonster()
 				monster = Object(x,y,TROLL_IMAGE,"troll",blocks=True,
 					fighter = fighter_component,ai=ai_component)
-			elif choice < 10+30+10:
+			elif choice =='skeleton':
 				#create skeleton 10% chance
 				fighter_component = Fighter(hp=10,defense=0,power=1,xp=30,death_function=monster_death)
 				ai_component = BasicMonster()
 				monster = Object(x,y,SKELETON_IMAGE,"skeleton",blocks=True,
 					fighter=fighter_component,ai=ai_component)
-			else:
+			elif choice == 'slime':
 				#create slime 50% chance
 				fighter_component = Fighter(hp=3,defense=0,power=1,xp=10,death_function=monster_death)
 				ai_component = BasicMonster()
@@ -369,18 +437,18 @@ def place_items(room):
 
 		#only place an item if the tile is not blocked
 		if not is_blocked(x, y):
-			choice = random_percentage()
-			if choice <30:
+			choice = random_choice(item_chances)
+			if choice == 'heal':
 				#create a healing potion
 				item_component = Item(use_function=cast_heal)
 				item = Object(x,y,HEALING_POTION_IMAGE,'healing potion',item=item_component)
 			
-			elif choice <30+15:
+			elif choice == 'lightning':
 				#create scroll of lightning
 				item_component = Item(use_function=cast_lightning)
 				item = Object(x,y,LIGHTNING_SCROLL_IMAGE,'scroll of lightning',item=item_component)
 			
-			elif choice <30+15+20:
+			elif choice == 'confuse':
 				#create scroll of confusion
 				item_component = Item(use_function=cast_confusion)
 				item = Object(x,y,CONFUSE_SCROLL_IMAGE,'scroll of confusion',item=item_component)
@@ -388,11 +456,15 @@ def place_items(room):
 #			elif choice <30+15+15+20:
 				#create scroll of ice lance
 				
-			else:
+			elif choice == 'fireball':
 				#create scroll of fireball
 				item_component = Item(use_function=cast_fireball)
 				item = Object(x,y,FIREBALL_SCROLL_IMAGE,'scroll of fireball',item=item_component)
-				
+			
+			elif choice == 'sword':
+				#create a sword
+				equipment_component = Equipment(slot='right hand')
+				item = Object(x,y,SWORD_IMAGE,'sword',equipment=equipment_component)
 				
 
 			objects.append(item)
@@ -479,7 +551,29 @@ def create_v_tunnel(y1,y2,x):
 	for y in range(min(y1,y2),max(y1,y2)+1):
 		map[x][y].blocked = False
 		map[x][y].block_sight = False
-		
+
+def random_choice_index(chances):	#choose one option from list of chances, return it's index
+			#the dice will land between 1 and the sum of chances
+			dice = random.randint(0, sum(chances))
+			
+			#go through all chances, keeping the sum so far
+			running_sum = 0
+			choice = 0
+			for w in chances:
+				running_sum += w
+				
+				#see if the dice landed in the part that corresponds to this choice
+				if dice <= running_sum:
+					return choice
+				choice += 1 
+			
+def random_choice(chances_dict):
+	#choose one option from dictionary of chances, return it's key
+	chances = chances_dict.values()
+	strings = chances_dict.keys()
+	
+	return strings[random_choice_index(chances)]
+	
 def make_map():
 	print MAP_SIZE
 	print "making map"
@@ -540,8 +634,10 @@ def make_map():
 
 def next_level():
 		#advance to the next level
+		global dungeon_level
 		message('You take a moment to rest')
 		player.fighter.heal(player.fighter.max_hp/2) #heal by 50%
+		dungeon_level += 1
 		
 		message('The adventure continues on the next floor',colors['red'])
 		make_map()
@@ -634,9 +730,10 @@ def render_panel():
 		panel.blit(message,(MSG_X,MSG_Y+(y*FONT_SIZE)))
 		y+=1
 
-	#draw name of object under the mouse
-	under_object = font.render(get_names_under_mouse(),AntiA,colors['white'])
-	panel.blit(under_object,(5,5))
+	get_names_under_mouse()
+	current_floor = font.render(str(dungeon_level),AntiA,colors['white'])
+	panel.blit(current_floor,(CURRENT_FLOOR_X,CURRENT_FLOOR_Y))
+	
 	render_bar(HP_BAR_X,HP_BAR_Y,300,'HP',player.fighter.hp,player.fighter.max_hp,
 			colors['red'],colors['black'])
 	render_bar(XP_BAR_X,XP_BAR_Y,300,'XP',player.fighter.xp,
@@ -675,7 +772,14 @@ def inventory_menu(header):
 	if len(inventory) == 0:
 		options = ['Inventory is empty.']
 	else:
-		options = [item.name for item in inventory]
+		options = []
+		for item in inventory:
+			text = item.name
+			#show additional information
+			if item.equipment and item.equipment.is_equipped:
+				text = text + ' (on ' + item.equipment.slot + ')'
+			options.append(text)
+			
 	index = menu(200,200,header, options)
 
 	if index is None or len(inventory) == 0: return None
@@ -782,6 +886,9 @@ def handle_keys():
 				if stairs.x == player.x and stairs.y == player.y:
 					next_level()
 					
+			elif event.key == K_p:
+				next_level()
+				
 			#give item change for different item
 			elif event.key == K_F10:
 				player.fighter.xp += 50
