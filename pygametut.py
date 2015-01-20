@@ -5,9 +5,11 @@ import math
 import textwrap
 import shelve
 import os
+import sys
 
 #import so pygame2exe functions correctly?
 import pygame._view
+import dbhash, anydbm
 
 
 pg.init()
@@ -24,6 +26,7 @@ HEALING_POTION_IMAGE = os.path.join("data","images","hp_potion.png")
 LIGHTNING_SCROLL_IMAGE = os.path.join("data","images","lightning_scroll.png")
 CONFUSE_SCROLL_IMAGE = os.path.join("data","images","confuse_scroll.png")
 FIREBALL_SCROLL_IMAGE = os.path.join("data","images","fireball_scroll.png")
+STAIRS_IMAGE = os.path.join("data","images","stairs.png")
 
 
 ROOM_MAX_SIZE = 10
@@ -33,6 +36,18 @@ MAX_ROOM_MONSTERS=3
 MAX_ROOM_ITEMS=2
 
 fullscreen = False
+
+if len(sys.argv) > 1:
+	arg = str(sys.argv[1])
+	if arg == '-f':
+		fullscreen = True
+	else:
+		fullscreen = False
+
+
+#PLAYER VARIABLES
+LEVEL_UP_BASE = 200
+LEVEL_UP_FACTOR = 150
 
 #items
 HP_POTION_AMOUNT = 5
@@ -59,7 +74,8 @@ colors = {
 			'orange':(255,128,0),
 			'pink':(255,0,255),
 			'lightblue':(0,255,255),
-			'grey':(128,128,128)
+			'grey':(128,128,128),
+			'yellow':(255,255,0)
 			}
 
 BGCOLOR = colors['black']
@@ -92,6 +108,10 @@ game_msgs = []
 #HP bar constants
 HP_BAR_X = 50
 HP_BAR_Y = 500
+
+#EXPERIENCE BAR
+XP_BAR_X = 50
+XP_BAR_Y = 530
 
 
 #GUI side panel
@@ -177,8 +197,8 @@ class Object:
 		objects.insert(0,self)
 		
 	def draw(self):
-		surfaceImage = pg.image.load(self.image).convert()
-		window.blit(surfaceImage, (self.x*TILE_SIZE, self.y*TILE_SIZE))
+		#surfaceImage = pg.image.load(self.image).convert()
+		window.blit(pg.image.load(self.image).convert(), (self.x*TILE_SIZE, self.y*TILE_SIZE))
 	
 	def clear(self):
 		window.fill(BGCOLOR,pg.Rect((self.x,self.y),(TILE_SIZE,TILE_SIZE)))
@@ -216,11 +236,12 @@ class Item:
 		
 class Fighter():
 	#combat related properties and methods
-	def __init__(self, hp, defense, power,death_function=None):
+	def __init__(self, hp, defense, power, xp=0, death_function=None):
 		self.max_hp = hp
 		self.hp = hp
 		self.defense = defense
 		self.power = power
+		self.xp = xp
 		self.death_function = death_function
 
 	def take_damage(self, damage):
@@ -231,6 +252,8 @@ class Fighter():
 			function = self.death_function
 			if function is not None:
 				function(self.owner)
+				if self.owner != player: #yields experience to the player
+					player.fighter.xp += self.xp
 
 	def heal(self, amount):
 		#heal by the given amount without going over the maximum
@@ -290,9 +313,8 @@ def player_death(player):
 
 def monster_death(monster):
 	#transform it into a corpse that doesn't block movement
-	message(monster.name + ' is dead.')
+	message(monster.name + ' dies and gives you ' + str(monster.fighter.xp) + ' experience.')
 	monster.image = CORPSE_IMAGE
-	monster.surfaceImage = pg.image.load(CORPSE_IMAGE).convert()
 	monster.blocks = False
 	monster.fighter = None
 	monster.ai = None
@@ -314,25 +336,25 @@ def place_monsters(room):
 
 			if choice <10:
 				#create an orc 10% chance
-				fighter_component = Fighter(hp=10,defense=0,power=3,death_function=monster_death)
+				fighter_component = Fighter(hp=10,defense=0,power=3,xp=30,death_function=monster_death)
 				ai_component = BasicMonster()
 				monster = Object(x,y,ORC_IMAGE,"orc",blocks=True,
 					fighter = fighter_component,ai=ai_component)
 			elif choice <10+30:
 				#create a troll 30% chance
-				fighter_component = Fighter(hp=10,defense=0,power=2,death_function=monster_death)
+				fighter_component = Fighter(hp=10,defense=0,power=2,xp=25,death_function=monster_death)
 				ai_component = BasicMonster()
 				monster = Object(x,y,TROLL_IMAGE,"troll",blocks=True,
 					fighter = fighter_component,ai=ai_component)
 			elif choice < 10+30+10:
 				#create skeleton 10% chance
-				fighter_component = Fighter(hp=10,defense=0,power=1,death_function=monster_death)
+				fighter_component = Fighter(hp=10,defense=0,power=1,xp=30,death_function=monster_death)
 				ai_component = BasicMonster()
 				monster = Object(x,y,SKELETON_IMAGE,"skeleton",blocks=True,
 					fighter=fighter_component,ai=ai_component)
 			else:
 				#create slime 50% chance
-				fighter_component = Fighter(hp=3,defense=0,power=1,death_function=monster_death)
+				fighter_component = Fighter(hp=3,defense=0,power=1,xp=10,death_function=monster_death)
 				ai_component = BasicMonster()
 				monster = Object(x,y,SLIME_IMAGE,"slime",blocks=True,
 					fighter=fighter_component,ai=ai_component)
@@ -461,7 +483,7 @@ def create_v_tunnel(y1,y2,x):
 def make_map():
 	print MAP_SIZE
 	print "making map"
-	global map, objects
+	global map, objects, stairs
 	
 	#the list of objects 
 	objects = [player]
@@ -511,6 +533,19 @@ def make_map():
 			rooms.append(new_room)
 			num_rooms += 1
 	
+	
+	stairs = Object(new_x,new_y,STAIRS_IMAGE,'stairs',)
+	objects.append(stairs)
+	stairs.send_to_back()
+
+def next_level():
+		#advance to the next level
+		message('You take a moment to rest')
+		player.fighter.heal(player.fighter.max_hp/2) #heal by 50%
+		
+		message('The adventure continues on the next floor',colors['red'])
+		make_map()
+		
 def player_move_or_attack(dx, dy):
 	
 	x = player.x + dx
@@ -544,10 +579,38 @@ def message(new_msg, color = colors['white']):
 
 def msgbox(text, width=50):
 	menu(250,2,text,[]) #use menu() as a sort of message box
-	
+
+def check_level_up():
+	#see if the player's ex is enough to level up
+	level_up_xp = LEVEL_UP_BASE + (player.level * LEVEL_UP_FACTOR)
+	#print player.fighter.xp, level_up_xp
+	if player.fighter.xp >= level_up_xp:
+		#it is enough to level up
+		player.level += 1
+		player.fighter.xp -= level_up_xp
+		message('Your battle skills grow stronger!',colors['yellow'])
+		
+		choice = None
+		
+		while choice == None: #keep asking till choice is made
+			choice = menu(400,500, 'LEVEL UP! choose a stat to raise:',
+				['Constitution: HP '+str(player.fighter.max_hp) + '(+20)',
+				 'Strength: ATK ' +str(player.fighter.power) + '(+1)',
+				 'Defense: DEF ' +str(player.fighter.defense) + '(+1)'])
+				 
+		if choice == 0:
+			player.fighter.max_hp += 20
+			player.fighter.hp += 20
+		elif choice == 1:
+			player.fighter.power += 1
+		elif choice == 2:
+			player.fighter.defense += 1 
+			
+		print 'stat increased'
+		
 def render_bar(x,y,total_width,name,value,maximum,bar_color,back_color):
 	#clear side panel
-	panel.fill(colors['black'])
+	#panel.fill(colors['black'])
 	#render a bar (hp, experience, etc). first calculation the width of the bar
 	bar_width = int(float(value) / maximum * total_width)
 
@@ -574,7 +637,12 @@ def render_panel():
 	#draw name of object under the mouse
 	under_object = font.render(get_names_under_mouse(),AntiA,colors['white'])
 	panel.blit(under_object,(5,5))
+	render_bar(HP_BAR_X,HP_BAR_Y,300,'HP',player.fighter.hp,player.fighter.max_hp,
+			colors['red'],colors['black'])
+	render_bar(XP_BAR_X,XP_BAR_Y,300,'XP',player.fighter.xp,
+			LEVEL_UP_BASE + (player.level * LEVEL_UP_FACTOR),colors['green'],colors['black'])
 
+	
 def menu(x,y, header, options):
 	if len(options) > 26: raise ValueError('Cannot have a menu with more than 26 options.')
 
@@ -585,7 +653,6 @@ def menu(x,y, header, options):
 	window.blit(header,(x,y))
 	#print all options
 	y = header_height
-	print x,y
 	letter_index = ord('a')
 	for option_text in options:
 		text = font.render('(' + chr(letter_index) + ') ' + option_text,AntiA, colors['white'])
@@ -614,6 +681,13 @@ def inventory_menu(header):
 	if index is None or len(inventory) == 0: return None
 	return inventory[index].item
 
+def render_stats():
+	level_up_xp = LEVEL_UP_BASE+(player.level * LEVEL_UP_FACTOR)
+#	msgbox('Character Information\n\nLevel: '+str(player.level)+'\nExperience: '+str(player.fighter.xp)+
+#		'\nExperience to level up: '+str(level_up_xp)+'\n\nMaximum HP: '+str(player.fighter.max_hp)+
+#		'\nAttack: '+str(player.fighter.power)+'\nDefense: '+str(player.fighter.defense))
+	stats = [str(player.level),str(player.fighter.xp),str(player.fighter.max_hp),str(level_up_xp),str(player.fighter.power),str(player.fighter.defense)]
+	
 def render_all():
 	#draw all objects
 	
@@ -630,8 +704,7 @@ def render_all():
 			object.draw()
 		player.draw()
 
-	render_bar(HP_BAR_X,HP_BAR_Y,300,'HP',player.fighter.hp,player.fighter.max_hp,
-			colors['red'],colors['black'])
+	panel.fill(colors['black'])
 	render_panel()
 	window.blit(panel,(PANEL_X,PANEL_Y))
 
@@ -647,9 +720,9 @@ def is_blocked(x, y):
 	return False
 
 def toggle_fullscreen():
-	global window
+	global window, fullscreen
 	flags = window.get_flags()
-	if flags&FULLSCREEN==False:
+	if fullscreen ==False:
 		print 'going fullscreen'
 		window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE),
 					pg.FULLSCREEN)
@@ -678,6 +751,9 @@ def handle_keys():
 			elif ((event.key == K_RETURN) and 
 							(event.mod&(KMOD_LALT|KMOD_RALT)) != 0):
 				toggle_fullscreen()
+			elif ((event.key == K_n) and
+							(event.mod&(KMOD_LALT|KMOD_RALT)) !=0):
+				new_game()
 			elif event.key == K_F7:
 				player.fighter.take_damage(7)
 				message('You deal 7 damage to yourself')
@@ -693,20 +769,29 @@ def handle_keys():
 				if chosen_item is not None:
 					#print('using ' + chosen_item.name)
 					chosen_item.use()
-			elif event.key == K_F8:
-				cast_heal()
 			elif event.key == K_d:
 				#show the inventory; if an item is selected drop it
 				chosen_item = inventory_menu('select item to be dropped')
 				if chosen_item is not None:
 					chosen_item.drop()
+			elif event.key == K_c:
+				render_stats()
+					
+			elif event.key == K_PERIOD or event.key == K_GREATER:
+				print 'pushed period'
+				if stairs.x == player.x and stairs.y == player.y:
+					next_level()
 					
 			#give item change for different item
+			elif event.key == K_F10:
+				player.fighter.xp += 50
 			elif event.key == K_F9:
 				item_component = Item(use_function=cast_fireball)
 				item = Object(2,2,FIREBALL_SCROLL_IMAGE,'scroll of fireball',item=item_component)
 				inventory.append(item)
-
+			#heal player 
+			elif event.key == K_F8:
+				cast_heal()
 			if game_state == 'playing':
 				if event.key == K_RIGHT:
 					player_move_or_attack(1,0)
@@ -782,21 +867,21 @@ def target_tile(max_range = None):
 					message('action cancelled')
 					return (None, None)
 
-					
-					
 """
 new game and initializing and loading 
 junk like that
 """
 def new_game():
-	global player, inventory, game_msgs, game_state
+	global player, inventory, game_msgs, game_state, dungeon_level
 
 	
 	#create player
 	fighter_component = Fighter(hp=30,defense=2,power=50,death_function=player_death)
 	player = Object(1,1,PLAYER_IMAGE,'player',blocks=True,fighter=fighter_component)
+	player.level = 1
 	
 	#generate map 
+	dungeon_level = 1 
 	make_map()
 	#initializeFOV()
 	game_state = 'playing'
@@ -818,7 +903,7 @@ def play_game():
 	grassSurface = pg.image.load(GRASS_IMAGE).convert()
 	
 	#main surface window
-	if fullscreen == True:
+	if fullscreen:
 		window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE),pg.FULLSCREEN)
 	else:
 		window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE))
@@ -835,6 +920,7 @@ def play_game():
 		#render the screen
 		window.fill(BGCOLOR)
 		render_all()
+		check_level_up()
 		
 		player_action = handle_keys()
 		if player_action == 'exit':
@@ -847,6 +933,11 @@ def play_game():
 					object.ai.take_turn()
 		pg.display.update()
 		fpsClock.tick(LIMIT_FPS)
+	window.fill(BGCOLOR)
+	if fullscreen:
+		window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE),pg.FULLSCREEN)
+	else:
+		window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE))
 
 def save_game():
 	#open a new empty shelve overwritting an old one
@@ -857,30 +948,41 @@ def save_game():
 	file['inventory'] = inventory
 	file['game_msgs'] = game_msgs
 	file['game_state'] = game_state
+	file['stairs_index'] = objects.index(stairs)
+	file['dungeon_level'] = dungeon_level
 	file.close()
 	
 def load_game():
 	#open the previously saved shelve and load data
 	global map, objects, player, inventory, game_msgs, game_state
+	global stairs, dungeon_level
 	
 	file = shelve.open('savegame', 'r')
 	map = file['map']
 	objects = file['objects']
 	player = objects[file['player_index']] #get index of player in objects
 	inventory = file['inventory']
-	game_msgs = file['game_msgs']
+	game_msgs = objects[file['game_msgs']]
 	game_state = file['game_state']
+	stairs = file['stairs_index']
+	dungeon_level = file['dungeon_level']
 	file.close()
 	
 def main_menu():
 	global window
-	window = pg.display.set_mode((600,500))
+#	window = pg.display.set_mode((600,500))
+	if fullscreen:
+		window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE),pg.FULLSCREEN)
+	else:
+		window = pg.display.set_mode((TILE_SIZE*MAP_SIZE+500,TILE_SIZE*MAP_SIZE))
+		
 	bckgndSurface = pg.image.load(os.path.join("data","images","menu_background.png")).convert()
-	window.blit(bckgndSurface,(0,0))
 	while True:
+		window.blit(bckgndSurface,(0,0))
 		choice = menu(250,12,'main menu',['Play a new game',
 											'Continue last game',
 											'Quit'])
+											
 		if choice == 0: #new game
 			new_game()
 			play_game()
